@@ -11,12 +11,12 @@ pub fn main() !void {
 
     while (true) {
         const conn = server.accept() catch |err| {
-            std.debug.print("accept error: {}\n", .{err});
+            std.debug.print("accept error: {any}\n", .{err});
             continue;
         };
-        std.debug.print("[+] client connected from {}\n", .{conn.address});
+        std.debug.print("[+] client connected from {any}\n", .{conn.address});
         handleClient(conn.stream) catch |err| {
-            std.debug.print("[!] client handler error: {}\n", .{err});
+            std.debug.print("[!] client handler error: {any}\n", .{err});
         };
         conn.stream.close();
         std.debug.print("[-] client disconnected\n", .{});
@@ -24,42 +24,54 @@ pub fn main() !void {
 }
 
 fn handleClient(stream: std.net.Stream) !void {
-    var buf: [proto.MAX_MESSAGE_LEN]u8 = undefined;
-    const reader = stream.reader();
-    const writer = stream.writer();
+    var reader_buf: [proto.MAX_MESSAGE_LEN]u8 = undefined;
+    var writer_buf: [512]u8 = undefined;
+    var net_reader = stream.reader(&reader_buf);
+    var net_writer = stream.writer(&writer_buf);
+    // reader.interface() is a method that returns *Io.Reader
+    // writer.interface is a field of type Io.Writer
+    const r = net_reader.interface();
+    const w = &net_writer.interface;
 
     while (true) {
-        // readUntilDelimiterOrEof returns the data before '\n', or null on EOF.
-        const maybe_line = reader.readUntilDelimiterOrEof(&buf, '\n') catch |err| switch (err) {
+        // takeDelimiter reads up to (but not including) '\n', returns null on EOF.
+        const maybe_line = r.takeDelimiter('\n') catch |err| switch (err) {
             error.StreamTooLong => {
-                try writer.writeAll("ERROR: message too long\n");
+                // Line exceeded reader buffer — tell client and skip the rest of the line.
+                try w.writeAll("ERROR: message too long\n");
+                try w.flush();
+                _ = r.discardDelimiterInclusive('\n') catch {};
                 continue;
             },
-            else => return err,
+            error.ReadFailed => return error.ReadFailed,
         };
-        const line = maybe_line orelse break; // client closed connection
+        const line = maybe_line orelse break; // null = client closed connection (EOF)
 
         const cmd = proto.Command.parse(line);
         switch (cmd) {
             .ping => {
                 std.debug.print("  < PING\n", .{});
-                try writer.writeAll("PONG\n");
+                try w.writeAll("PONG\n");
+                try w.flush();
                 std.debug.print("  > PONG\n", .{});
             },
             .echo => |payload| {
                 std.debug.print("  < ECHO {s}\n", .{payload});
-                try writer.print("ECHO: {s}\n", .{payload});
+                try w.print("ECHO: {s}\n", .{payload});
+                try w.flush();
                 std.debug.print("  > ECHO: {s}\n", .{payload});
             },
             .quit => {
                 std.debug.print("  < QUIT\n", .{});
-                try writer.writeAll("BYE\n");
+                try w.writeAll("BYE\n");
+                try w.flush();
                 std.debug.print("  > BYE\n", .{});
                 break;
             },
             .unknown => |raw| {
                 std.debug.print("  < UNKNOWN: '{s}'\n", .{raw});
-                try writer.print("ERROR: unknown command '{s}'\n", .{raw});
+                try w.print("ERROR: unknown command '{s}'\n", .{raw});
+                try w.flush();
             },
         }
     }
