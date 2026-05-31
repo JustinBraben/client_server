@@ -1,43 +1,40 @@
 const std = @import("std");
 const proto = @import("client_server");
 
-pub fn main() !void {
-    const address = try std.net.Address.parseIp4("0.0.0.0", proto.PORT);
-    var server = try address.listen(.{ .reuse_address = true });
-    defer server.deinit();
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const address = try std.Io.net.IpAddress.parseIp4("0.0.0.0", proto.PORT);
+    var server = try address.listen(io, .{ .reuse_address = true });
+    defer server.deinit(io);
 
     std.debug.print("Server listening on 0.0.0.0:{d}\n", .{proto.PORT});
     std.debug.print("Press Ctrl+C to stop.\n", .{});
 
     while (true) {
-        const conn = server.accept() catch |err| {
+        const conn = server.accept(io) catch |err| {
             std.debug.print("accept error: {any}\n", .{err});
             continue;
         };
-        std.debug.print("[+] client connected from {any}\n", .{conn.address});
-        handleClient(conn.stream) catch |err| {
+        defer conn.close(io);
+        std.debug.print("[+] client connected\n", .{});
+        handleClient(io, conn) catch |err| {
             std.debug.print("[!] client handler error: {any}\n", .{err});
         };
-        conn.stream.close();
         std.debug.print("[-] client disconnected\n", .{});
     }
 }
 
-fn handleClient(stream: std.net.Stream) !void {
+fn handleClient(io: std.Io, stream: std.Io.net.Stream) !void {
     var reader_buf: [proto.MAX_MESSAGE_LEN]u8 = undefined;
     var writer_buf: [512]u8 = undefined;
-    var net_reader = stream.reader(&reader_buf);
-    var net_writer = stream.writer(&writer_buf);
-    // reader.interface() is a method that returns *Io.Reader
-    // writer.interface is a field of type Io.Writer
-    const r = net_reader.interface();
+    var net_reader = stream.reader(io, &reader_buf);
+    var net_writer = stream.writer(io, &writer_buf);
+    const r = &net_reader.interface;
     const w = &net_writer.interface;
 
     while (true) {
-        // takeDelimiter reads up to (but not including) '\n', returns null on EOF.
         const maybe_line = r.takeDelimiter('\n') catch |err| switch (err) {
             error.StreamTooLong => {
-                // Line exceeded reader buffer — tell client and skip the rest of the line.
                 try w.writeAll("ERROR: message too long\n");
                 try w.flush();
                 _ = r.discardDelimiterInclusive('\n') catch {};
@@ -45,7 +42,7 @@ fn handleClient(stream: std.net.Stream) !void {
             },
             error.ReadFailed => return error.ReadFailed,
         };
-        const line = maybe_line orelse break; // null = client closed connection (EOF)
+        const line = maybe_line orelse break;
 
         const cmd = proto.Command.parse(line);
         switch (cmd) {

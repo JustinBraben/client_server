@@ -15,7 +15,7 @@ pub const Command = union(enum) {
     /// Parse a line received from the network (may contain a trailing \r).
     /// The returned slice borrows from `line`.
     pub fn parse(line: []const u8) Command {
-        const trimmed = std.mem.trimRight(u8, line, "\r\n");
+        const trimmed = std.mem.trimEnd(u8, line, "\r\n");
         if (std.mem.eql(u8, trimmed, "PING")) return .ping;
         if (std.mem.eql(u8, trimmed, "QUIT")) return .quit;
         if (std.mem.startsWith(u8, trimmed, "ECHO ") and trimmed.len > 5)
