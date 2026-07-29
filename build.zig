@@ -10,17 +10,18 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
 
-    // Server executable
+    // Client
+    const server_exe_mod = b.createModule(.{
+        .root_source_file = b.path("src/server.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "client_server", .module = proto_mod },
+        },
+    });
     const server_exe = b.addExecutable(.{
         .name = "server",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/server.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "client_server", .module = proto_mod },
-            },
-        }),
+        .root_module = server_exe_mod,
     });
     b.installArtifact(server_exe);
 
@@ -29,17 +30,18 @@ pub fn build(b: *std.Build) void {
     const run_server_step = b.step("run-server", "Build and run the TCP server");
     run_server_step.dependOn(&run_server_cmd.step);
 
-    // Client executable
+    // Client 
+    const client_exe_mod = b.createModule(.{
+        .root_source_file = b.path("src/client.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "client_server", .module = proto_mod },
+        },
+    });
     const client_exe = b.addExecutable(.{
         .name = "client",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/client.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "client_server", .module = proto_mod },
-            },
-        }),
+        .root_module = client_exe_mod,
     });
     b.installArtifact(client_exe);
 
